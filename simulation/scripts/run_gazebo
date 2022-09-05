@@ -1,0 +1,2 @@
+#!/usr/bin/env sh
+ign gazebo -r hawkeye_world.sdf

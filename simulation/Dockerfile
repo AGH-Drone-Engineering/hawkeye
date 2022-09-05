@@ -1,0 +1,13 @@
+FROM carbon225/ros-gazebo-ardu:humble-fortress
+
+RUN apt-get update
+
+RUN echo source '/root/hawkeye/ros2_ws/install/setup.bash' >> /root/.bashrc
+ENV PATH=/root/hawkeye/scripts:$PATH
+ENV IGN_GAZEBO_RESOURCE_PATH=/root/hawkeye/models:/root/hawkeye/worlds:$IGN_GAZEBO_RESOURCE_PATH
+
+COPY . /root/hawkeye
+
+WORKDIR /root/hawkeye/ros2_ws
+RUN /ros_entrypoint.sh rosdep install -i --from-path src --rosdistro $ROS_DISTRO -y
+RUN /ros_entrypoint.sh colcon build
