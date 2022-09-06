@@ -24,7 +24,6 @@ setup(
     entry_points={
         'console_scripts': [
             'gods_hand = hawkeye_sim.gods_hand:main',
-            'gods_eye = hawkeye_sim.gods_eye:main',
             'logical_camera = hawkeye_sim.logical_camera:main',
         ],
     },
