@@ -6,7 +6,8 @@
 	"workspaceMount": "",
 	"workspaceFolder": "/workspace",
 	"runArgs": [
-		"--volume=${localWorkspaceFolder}:/workspace:Z"
+		"--volume=${localWorkspaceFolder}:/workspace:Z",
+		"--net=ros"
 	],
 	"forwardPorts": [5900],
 	"overrideCommand": false,
@@ -17,7 +18,9 @@
 				"ms-python.python",
 				"ms-vscode.cpptools",
 				"twxs.cmake",
-				"ms-vscode.cmake-tools"
+				"ms-vscode.cmake-tools",
+				"GitHub.copilot",
+				"eamodio.gitlens"
 			]
 		}
 	}

@@ -1,3 +1,2 @@
 #!/usr/bin/env sh
-
 ros2 run mavros mavros_node --ros-args --param fcu_url:=tcp://localhost:8888
