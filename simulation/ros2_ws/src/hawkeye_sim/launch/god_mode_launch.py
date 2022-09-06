@@ -4,7 +4,24 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
-        # ExecuteProcess(cmd=['ign', 'gazebo', '-r', 'hawkeye_world.sdf']),
+        # ExecuteProcess(
+        #     cmd=[
+        #         'ign',
+        #         'gazebo',
+        #         '-r',
+        #         'hawkeye_world.sdf',
+        #     ],
+        # ),
+        # ExecuteProcess(
+        #     cmd=[
+        #         'sim_vehicle.py',
+        #         '-w',
+        #         '-v', 'ArduCopter',
+        #         '-f', 'gazebo-iris',
+        #         '--model', 'JSON',
+        #         '-m', '--out=tcpin:0.0.0.0:8888',
+        #     ],
+        # ),
         # Node(
         #     package='mavros',
         #     executable='mavros_node',
@@ -22,17 +39,12 @@ def generate_launch_description():
         Node(
             package='hawkeye_sim',
             executable='gods_hand',
-            remappings=[
-                ('pose', 'iris_dummy/pose'),
-            ],
         ),
         Node(
             package='hawkeye_sim',
-            executable='gods_eye',
+            executable='logical_camera',
             remappings=[
-                ('follower/pose', '/mavros/local_position/pose'),
-                ('target/pose', 'iris_dummy/pose'),
-                ('follower/target/vec', 'iris/iris_dummy/vec'),
+                ('target/vec', 'iris/iris_dummy/vec'),
             ],
         ),
     ])

@@ -58,7 +58,10 @@ class MavrosUniversalVehicleDriver(Node):
             Vector3,
             'target/vec',
             self.point_callback,
-            1,
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+            ),
         )
 
         self.arm_message = CommandBool.Request()
