@@ -3,12 +3,14 @@
 		"context": "..",
 		"dockerfile": "./Dockerfile"
 	},
+	"workspaceMount": "",
+	"workspaceFolder": "/workspace",
 	"runArgs": [
-		"--net=ros"
+		"--volume=${localWorkspaceFolder}:/workspace:Z"
 	],
 	"forwardPorts": [5900],
 	"overrideCommand": false,
-	"postCreateCommand": "bash -c 'cd /workspaces/${localWorkspaceFolderBasename}/ros2_ws && /ros_entrypoint.sh colcon build --symlink-install'",
+	"postCreateCommand": "bash -ic 'cd /workspace/ros2_ws && colcon build --symlink-install'",
 	"customizations": {
 		"vscode": {
 			"extensions": [
