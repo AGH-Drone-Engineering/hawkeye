@@ -1,3 +1,4 @@
+import threading
 import subprocess
 import re
 
@@ -45,19 +46,20 @@ def main(args=None):
     rclpy.init(args=args)
     logical_camera = LogicalCamera()
 
-    rate = logical_camera.create_rate(30)
+    spinner = threading.Thread(target=rclpy.spin, args=(logical_camera,), daemon=True)
+    spinner.start()
+
+    rate = logical_camera.create_rate(10)
 
     while rclpy.ok():
-        try:
-            output = subprocess.check_output(['ign', 'topic', '-n', '1', '-e', '-t', '/logical_camera'])
-            target_pose = extract_target_pose_from_output(output.decode())
-            if target_pose is not None:
-                logical_camera.target_vec_pub.publish(target_pose)
-        finally:
-            rclpy.spin_once(logical_camera, timeout_sec=0)
-            rate.sleep()
+        output = subprocess.check_output(['bash', '-c', 'ign topic -n 1 -e -t /logical_camera'])
+        target_pose = extract_target_pose_from_output(output.decode())
+        if target_pose is not None:
+            logical_camera.target_vec_pub.publish(target_pose)
+        rate.sleep()
 
     rclpy.shutdown()
+    spinner.join()
 
 
 if __name__ == '__main__':

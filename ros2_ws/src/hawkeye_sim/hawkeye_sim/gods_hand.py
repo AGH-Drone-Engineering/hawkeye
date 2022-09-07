@@ -9,7 +9,7 @@ from rclpy.node import Node
 
 def ign_set_pose(model: str, pos: Tuple[float, float, float]):
     x, y, z = pos
-    cmd = 'ign service -s /world/iris_arducopter_runway/set_pose --reqtype ignition.msgs.Pose --reptype ignition.msgs.Boolean --timeout 0 --req \'{}\' > /dev/null'
+    cmd = 'ign service -s /world/iris_arducopter_runway/set_pose --reqtype ignition.msgs.Pose --reptype ignition.msgs.Boolean --timeout 1000 --req \'{}\' > /dev/null'
     req = f'name: "{model}", position: {{x: {x}, y: {y}, z: {z}}}'
     subprocess.check_call(['bash', '-c', cmd.format(req)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
