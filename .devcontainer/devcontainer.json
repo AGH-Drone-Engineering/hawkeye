@@ -11,7 +11,7 @@
 	],
 	"forwardPorts": [5900],
 	"overrideCommand": false,
-	"postCreateCommand": "bash -ic 'cd /workspace/ros2_ws && colcon build --symlink-install'",
+	"postCreateCommand": "bash -ic 'cd /workspace/ros2_ws && ./c && ./b'",
 	"customizations": {
 		"vscode": {
 			"extensions": [
