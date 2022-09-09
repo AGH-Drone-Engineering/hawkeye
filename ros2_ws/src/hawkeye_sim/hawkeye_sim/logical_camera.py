@@ -1,3 +1,5 @@
+
+from typing import List, Tuple
 import threading
 import subprocess
 import re
@@ -6,31 +8,30 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import ReliabilityPolicy, QoSProfile
 
-from geometry_msgs.msg import Vector3
+from tf2_ros import TransformBroadcaster
+
+from geometry_msgs.msg import Pose, Vector3, TransformStamped
 
 
-MODEL_REGEX = re.compile(r'^model {[\s\S]*}$', re.MULTILINE)
-MODEL_NAME_REGEX = re.compile(r'^ {2}name: "(.*)"$', re.MULTILINE)
-MODEL_POSITION_REGEX = re.compile(r'^ {4}position {\n {6}x: (.*)\n {6}y: (.*)\n {6}z: (.*)\n {4}}$', re.MULTILINE)
+LOGICAL_CAMERA_REGEX = re.compile(r'model {\n {2}name: "(.*)"\n {2}pose {\n {4}position {\n {6}x: (.*)\n {6}y: (.*)\n {6}z: (.*)\n {4}}(?:\n {4}.*)*\n {2}}\n}')
 
 
-def extract_target_pose_from_output(output: str) -> Vector3:
-    models = MODEL_REGEX.findall(output)
-    for model in models:
-        name = MODEL_NAME_REGEX.search(model).group(1)
-        if name != 'iris_dummy':
-            continue
-        x, y, z = MODEL_POSITION_REGEX.search(model).group(1, 2, 3)
-        pose = Vector3()
-        pose.x = float(x)
-        pose.y = float(y)
-        pose.z = float(z)
-        return pose
+def extract_target_poses_from_output(output: str) -> List[Tuple[str, Pose]]:
+    poses = []
+    for match in LOGICAL_CAMERA_REGEX.finditer(output):
+        pose = Pose()
+        pose.position.x = float(match.group(2))
+        pose.position.y = float(match.group(3))
+        pose.position.z = float(match.group(4))
+        poses.append((match.group(1), pose))
+    return poses
 
 
 class LogicalCamera(Node):
     def __init__(self):
         super().__init__('logical_camera')
+
+        self.br = TransformBroadcaster(self)
 
         self.target_vec_pub = self.create_publisher(
             Vector3,
@@ -52,10 +53,24 @@ def main(args=None):
     rate = logical_camera.create_rate(10)
 
     while rclpy.ok():
-        output = subprocess.check_output(['bash', '-c', 'ign topic -n 1 -e -t /logical_camera'])
-        target_pose = extract_target_pose_from_output(output.decode())
-        if target_pose is not None:
-            logical_camera.target_vec_pub.publish(target_pose)
+        output = subprocess.run(['ign', 'topic', '-n', '1', '-e', '-t', '/logical_camera'], stdout=subprocess.PIPE).stdout
+        target_poses = extract_target_poses_from_output(output.decode())
+        for (target, pose) in target_poses:
+            t = TransformStamped()
+            t.header.stamp = logical_camera.get_clock().now().to_msg()
+            t.header.frame_id = 'base_link'
+            t.child_frame_id = target
+            t.transform.translation.x = pose.position.x
+            t.transform.translation.y = pose.position.y
+            t.transform.translation.z = pose.position.z
+            logical_camera.br.sendTransform(t)
+
+            if target == 'iris_dummy':
+                vec = Vector3()
+                vec.x = pose.position.x
+                vec.y = pose.position.y
+                vec.z = pose.position.z
+                logical_camera.target_vec_pub.publish(vec)
         rate.sleep()
 
     rclpy.shutdown()

@@ -27,7 +27,7 @@ def generate_launch_description():
             parameters=[{
                 'fcu_url': 'udp://127.0.0.1:14550@',
                 'plugin_allowlist': [
-                    'sys_status',
+                    'sys_*',
                     'command',
                     'global_position',
                     'local_position',
