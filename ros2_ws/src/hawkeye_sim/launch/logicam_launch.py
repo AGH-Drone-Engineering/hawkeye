@@ -13,20 +13,11 @@ def generate_launch_description():
             executable='logical_camera',
         ),
         Node(
-            package='hawkeye_sim',
-            executable='tf2vec',
-            parameters=[{
-                'target_frame': 'iris_dummy',
-            }],
-            remappings=[
-                ('vec', 'drone/target/vec'),
-            ],
-        ),
-        Node(
             package='hawkeye_control',
             executable='all_vehicle_types',
-            remappings=[
-                ('target/vec', 'drone/target/vec'),
-            ],
+            parameters=[{
+                'drone_frame': 'base_link',
+                'target_frame': 'iris_dummy',
+            }],
         ),
     ])

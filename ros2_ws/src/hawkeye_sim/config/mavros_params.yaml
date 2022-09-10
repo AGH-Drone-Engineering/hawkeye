@@ -4,7 +4,7 @@ mavros:
       "sys_*",
       "command",
       "local_position",
-      "setpoint_velocity",
+      "setpoint_position",
       "imu",
     ]
 
@@ -16,7 +16,3 @@ mavros/local_position:
   ros__parameters:
     tf:
       send: true
-
-mavros/setpoint_velocity:
-  ros__parameters:
-    mav_frame: "LOCAL_NED"

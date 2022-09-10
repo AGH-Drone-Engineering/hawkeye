@@ -26,7 +26,6 @@ setup(
         'console_scripts': [
             'gods_hand = hawkeye_sim.gods_hand:main',
             'logical_camera = hawkeye_sim.logical_camera:main',
-            'tf2vec = hawkeye_sim.tf2vec:main',
         ],
     },
 )

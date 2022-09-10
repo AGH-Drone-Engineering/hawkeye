@@ -1,13 +1,19 @@
-from scipy.spatial.transform import Rotation
-
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import ReliabilityPolicy, QoSProfile
 
 from tf2_ros import TransformListener, Buffer
 
 from mavros_msgs.srv import CommandBool, CommandTOL, CommandLong, SetMode
-from geometry_msgs.msg import TwistStamped, Vector3
+from geometry_msgs.msg import PoseStamped
+
+
+STATE_INIT = 'init'
+STATE_GUIDED_SENT = 'guided_sent'
+STATE_GUIDED_OK = 'guided_set'
+STATE_ARM_SENT = 'arm_sent'
+STATE_ARM_OK = 'arm_set'
+STATE_TAKEOFF_SENT = 'takeoff_sent'
+STATE_TAKEOFF_OK = 'takeoff_set'
 
 
 class MavrosUniversalVehicleDriver(Node):
@@ -15,9 +21,19 @@ class MavrosUniversalVehicleDriver(Node):
     def __init__(self):
         super().__init__('mavros_universal_driver')
 
-        self.guided_set = False
-        self.armed = False
-        self.takeoff_sent = False
+        self.declare_parameter('drone_frame', 'base_link')
+        self.drone_frame: str = self.get_parameter('drone_frame').value
+
+        self.declare_parameter('target_frame', 'target')
+        self.target_frame: str = self.get_parameter('target_frame').value
+
+        self.declare_parameter('takeoff_altitude', 2.0)
+        self.takeoff_alt: float = self.get_parameter('takeoff_altitude').value
+
+        self.declare_parameter('min_altitude', 1)
+        self.min_alt: float = self.get_parameter('min_altitude').value
+
+        self.state = STATE_INIT
 
         self.arm_client = self.create_client(CommandBool, '/mavros/cmd/arming')
         while not self.arm_client.wait_for_service(timeout_sec=3.0):
@@ -35,73 +51,64 @@ class MavrosUniversalVehicleDriver(Node):
         while not self.arm_client.wait_for_service(timeout_sec=3.0):
             self.get_logger().warn('Other service not available, waiting again...')
 
-        self.velocity_pub = self.create_publisher(
-            TwistStamped,
-            '/mavros/setpoint_velocity/cmd_vel',
-            10,
-        )
-
-        self.target_vec_sub = self.create_subscription(
-            Vector3,
-            'target/vec',
-            self.target_vec_callback,
-            QoSProfile(
-                depth=10,
-                reliability=ReliabilityPolicy.BEST_EFFORT,
-            ),
+        self.setpoint_pub = self.create_publisher(
+            PoseStamped,
+            '/mavros/setpoint_position/local',
+            1,
         )
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-    def target_vec_callback(self, vec_body: Vector3):
-        if not self.guided_set:
-            self.set_guided()
-            return
+        self.timer = self.create_timer(1 / 10, self.timer_callback)
 
-        if not self.armed:
-            self.arm()
-            return
-
-        if not self.takeoff_sent:
-            self.takeoff(2)
-            return
-
-        from_frame = 'map'
-        to_frame = 'base_link'
+    def timer_callback(self):
         try:
-            transform = self.tf_buffer.lookup_transform(
-                from_frame,
-                to_frame,
+            target_enu = self.tf_buffer.lookup_transform(
+                'map',
+                self.target_frame,
+                rclpy.time.Time(),
+            )
+            drone_enu = self.tf_buffer.lookup_transform(
+                'map',
+                self.drone_frame,
                 rclpy.time.Time(),
             )
         except Exception as e:
             self.warn(f'Could not get transform: {e}')
             return
 
-        if transform.transform.translation.z < 1:
-            self.info(f"Waiting for takeoff: {transform.transform.translation.z}")
+        if drone_enu.transform.translation.z > self.min_alt:
+            self.state = STATE_TAKEOFF_OK
+
+        if self.state == STATE_INIT:
+            self.send_guided()
+            self.state = STATE_GUIDED_SENT
             return
 
-        rot = Rotation.from_quat((
-            transform.transform.rotation.x,
-            transform.transform.rotation.y,
-            transform.transform.rotation.z,
-            transform.transform.rotation.w,
-        ))
-        vec_map = rot.apply((vec_body.x, vec_body.y, vec_body.z))
+        if self.state == STATE_GUIDED_OK:
+            self.send_arm()
+            self.state = STATE_ARM_SENT
+            return
 
-        vec_ned = (
-            vec_map[1],
-            vec_map[0],
-            -vec_map[2],
-        )
+        if self.state == STATE_ARM_OK:
+            self.send_takeoff(self.takeoff_alt)
+            self.state = STATE_TAKEOFF_SENT
+            return
 
-        msg = TwistStamped()
-        msg.twist.linear.x = vec_ned[0] * 0.2
-        msg.twist.linear.y = vec_ned[1] * 0.2
-        msg.twist.linear.z = vec_ned[2] * 0.2
-        self.velocity_pub.publish(msg)
+        if self.state != STATE_TAKEOFF_OK:
+            return
+
+        if drone_enu.transform.translation.z < self.min_alt:
+            self.info(f'Waiting for takeoff: {drone_enu.transform.translation.z:.2f} < {self.min_alt:.2f}')
+            return
+
+        msg = PoseStamped()
+        msg.header.frame_id = 'map'
+        msg.pose.position.x = target_enu.transform.translation.x
+        msg.pose.position.y = target_enu.transform.translation.y
+        msg.pose.position.z = target_enu.transform.translation.z
+        self.setpoint_pub.publish(msg)
 
     def info(self, msg):
         self.get_logger().info(str(msg))
@@ -112,32 +119,47 @@ class MavrosUniversalVehicleDriver(Node):
     def warn(self, msg):
         self.get_logger().warn(str(msg))
 
-    def set_guided(self):
+    def send_guided(self):
         msg = SetMode.Request()
         msg.base_mode = 0
         msg.custom_mode = "GUIDED"
         self.info("Request guided mode")
         fut = self.setmode_client.call_async(msg)
         def on_done(f):
-            self.guided_set = True
+            if f.result().mode_sent:
+                self.state = STATE_GUIDED_OK
+                self.info("Guided mode set")
+            else:
+                self.state = STATE_INIT
+                self.error("Could not set guided mode")
         fut.add_done_callback(on_done)
 
-    def arm(self):
+    def send_arm(self):
         msg = CommandBool.Request()
         msg.value = True
         self.info("Arming vehicle")
         fut = self.arm_client.call_async(msg)
         def on_done(f):
-            self.armed = True
+            if f.result().success:
+                self.state = STATE_ARM_OK
+                self.info("Vehicle armed")
+            else:
+                self.state = STATE_GUIDED_OK
+                self.error("Could not arm vehicle")
         fut.add_done_callback(on_done)
 
-    def takeoff(self, alt: float):
+    def send_takeoff(self, alt: float):
         msg = CommandTOL.Request()
         msg.altitude = float(alt)
         self.info("Request takeoff")
         fut = self.takeoff_client.call_async(msg)
         def on_done(f):
-            self.takeoff_sent = True
+            if f.result().success:
+                self.state = STATE_TAKEOFF_OK
+                self.info("Takeoff complete")
+            else:
+                self.state = STATE_ARM_OK
+                self.error("Could not takeoff")
         fut.add_done_callback(on_done)
 
 
