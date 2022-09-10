@@ -53,7 +53,7 @@
     </include>
 
     <include>
-      <pose>5 2 3 0 0 0</pose>
+      <pose>100 100 10 0 0 0</pose>
       <uri>model://iris_dummy</uri>
     </include>
 
