@@ -1,8 +1,18 @@
+import os
+
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess
 from launch_ros.actions import Node
 
+from ament_index_python.packages import get_package_share_directory
+
 def generate_launch_description():
+    mavros_params = os.path.join(
+        get_package_share_directory('hawkeye_sim'),
+        'config',
+        'mavros_params.yaml',
+    )
+
     return LaunchDescription([
         ExecuteProcess(
             cmd=[
@@ -24,15 +34,6 @@ def generate_launch_description():
         Node(
             package='mavros',
             executable='mavros_node',
-            parameters=[{
-                'fcu_url': 'udp://127.0.0.1:14550@',
-                'plugin_allowlist': [
-                    'sys_*',
-                    'command',
-                    'global_position',
-                    'local_position',
-                    'setpoint_velocity',
-                ],
-            }],
+            parameters=[mavros_params],
         ),
     ])

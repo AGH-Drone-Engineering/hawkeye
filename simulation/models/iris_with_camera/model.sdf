@@ -148,7 +148,7 @@
       <sensor name='logical_camera' type='logical_camera'>
         <update_rate>30</update_rate>
         <logical_camera>
-          <near>1</near>
+          <near>2</near>
           <far>500</far>
           <horizontal_fov>3.14</horizontal_fov>
           <aspect_ratio>1</aspect_ratio>

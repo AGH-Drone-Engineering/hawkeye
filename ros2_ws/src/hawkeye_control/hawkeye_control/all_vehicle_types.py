@@ -1,197 +1,153 @@
-import sys
+from scipy.spatial.transform import Rotation
+
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
-from mavros_msgs.srv import CommandBool
-from mavros_msgs.srv import CommandTOL
-from mavros_msgs.srv import CommandLong
-from geometry_msgs.msg import TwistStamped
-from geometry_msgs.msg import PoseStamped
-from geometry_msgs.msg import Vector3
-from mavros_msgs.srv import SetMode
-from std_msgs.msg import Float64
 from rclpy.qos import ReliabilityPolicy, QoSProfile
-from scipy.spatial.transform import Rotation as R
 
-minimal_client = None
+from tf2_ros import TransformListener, Buffer
 
-SPEED = 1.5
+from mavros_msgs.srv import CommandBool, CommandTOL, CommandLong, SetMode
+from geometry_msgs.msg import TwistStamped, Vector3
 
 
 class MavrosUniversalVehicleDriver(Node):
 
     def __init__(self):
         super().__init__('mavros_universal_driver')
-        
-        self.req_speed = Vector3()
-        self.rel_alt = -1
-        self.point_flag = False
-        self.quat_rotation = {"pose":{"position":{},"orientation":{"x":0,"y":0,"z":0,"w":0}}}
 
-        self.arm_client = self.create_client(CommandBool,'/mavros/cmd/arming')
+        self.guided_set = False
+        self.armed = False
+        self.takeoff_sent = False
+
+        self.arm_client = self.create_client(CommandBool, '/mavros/cmd/arming')
         while not self.arm_client.wait_for_service(timeout_sec=3.0):
             self.get_logger().warn('Arming service not available, waiting again...')
-        
-        self.takeoff_client = self.create_client(CommandTOL,'/mavros/cmd/takeoff')
+
+        self.takeoff_client = self.create_client(CommandTOL, '/mavros/cmd/takeoff')
         while not self.arm_client.wait_for_service(timeout_sec=3.0):
             self.get_logger().warn('Takeoff service not available, waiting again...')
-        
-        self.command_client = self.create_client(CommandLong,'/mavros/cmd/command')
+
+        self.command_client = self.create_client(CommandLong, '/mavros/cmd/command')
         while not self.arm_client.wait_for_service(timeout_sec=3.0):
             self.get_logger().warn('Other service not available, waiting again...')
-        
-        self.setmode_client = self.create_client(SetMode,'/mavros/set_mode')
+
+        self.setmode_client = self.create_client(SetMode, '/mavros/set_mode')
         while not self.arm_client.wait_for_service(timeout_sec=3.0):
             self.get_logger().warn('Other service not available, waiting again...')
-        self.velocity_publisher = self.create_publisher(TwistStamped, '/mavros/setpoint_velocity/cmd_vel',16)
-        self.alt_subscribtion = self.create_subscription(Float64,'/mavros/global_position/rel_alt',self.alt_callback,QoSProfile(depth=10,reliability=ReliabilityPolicy.BEST_EFFORT))
-        self.local_postion_subscribtion = self.create_subscription(PoseStamped,'/mavros/local_position/pose',self.pos_callback,QoSProfile(depth=10,reliability=ReliabilityPolicy.BEST_EFFORT))
-        self.point_subscribtion = self.create_subscription(Vector3,'target/vec',self.point_callback,QoSProfile(depth=10,reliability=ReliabilityPolicy.BEST_EFFORT))
 
-        self.arm_message = CommandBool.Request()
-        self.takeoff_message = CommandTOL.Request()
-        self.command_message = CommandLong.Request()
-        self.geo_message = TwistStamped()
-        self.setmode_message = SetMode.Request()
+        self.velocity_pub = self.create_publisher(
+            TwistStamped,
+            '/mavros/setpoint_velocity/cmd_vel',
+            10,
+        )
 
-    def pos_callback(self,data):
-        self.quat_rotation = data.pose.orientation
+        self.target_vec_sub = self.create_subscription(
+            Vector3,
+            'target/vec',
+            self.target_vec_callback,
+            QoSProfile(
+                depth=10,
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+            ),
+        )
 
-    def point_callback(self,data):
-        self.point_flag = True
-        self.req_speed = data
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
 
-    def alt_callback(self,data):
-        self.rel_alt = float(data.data)
+    def target_vec_callback(self, vec_body: Vector3):
+        if not self.guided_set:
+            self.set_guided()
+            return
 
-    def info(self,msg):
+        if not self.armed:
+            self.arm()
+            return
+
+        if not self.takeoff_sent:
+            self.takeoff(2)
+            return
+
+        from_frame = 'map'
+        to_frame = 'base_link'
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                from_frame,
+                to_frame,
+                rclpy.time.Time(),
+            )
+        except Exception as e:
+            self.warn(f'Could not get transform: {e}')
+            return
+
+        if transform.transform.translation.z < 1:
+            self.info(f"Waiting for takeoff: {transform.transform.translation.z}")
+            return
+
+        rot = Rotation.from_quat((
+            transform.transform.rotation.x,
+            transform.transform.rotation.y,
+            transform.transform.rotation.z,
+            transform.transform.rotation.w,
+        ))
+        vec_map = rot.apply((vec_body.x, vec_body.y, vec_body.z))
+
+        vec_ned = (
+            vec_map[1],
+            vec_map[0],
+            -vec_map[2],
+        )
+
+        msg = TwistStamped()
+        msg.twist.linear.x = vec_ned[0] * 0.2
+        msg.twist.linear.y = vec_ned[1] * 0.2
+        msg.twist.linear.z = vec_ned[2] * 0.2
+        self.velocity_pub.publish(msg)
+
+    def info(self, msg):
         self.get_logger().info(str(msg))
 
-    def arm_vehicle(self):
-        self.arm_message.value = True
-        self.info("OD ŚMIGŁA!!! Arming vehicle")
-        self.future_arm = self.arm_client.call_async(self.arm_message)
-
-    def takeoff(self,min_pitch=0.0,yaw=0.0,altitude=2.0):
-        self.takeoff_message.min_pitch = min_pitch
-        self.takeoff_message.yaw = yaw
-        self.takeoff_message.altitude = altitude
-        self.info("Request takeoff")
-        self.future_takeoff = self.takeoff_client.call_async(self.takeoff_message)
-
-    def guided(self):
-        self.command_message.command = 176
-        #self.command_message.param1 = 216.0
-        self.command_message.param1 = 88.0
-
-        self.setmode_message.base_mode = 0
-        self.setmode_message.custom_mode = "GUIDED"
-        self.info("Request guided mode")
-        self.future_setmode = self.setmode_client.call_async(self.setmode_message)
-
-    def subscribe_altitude(self):
-        self.command_message.command = 511
-        self.command_message.param1 = 33.0
-        self.info(self.command_client.call_async(self.command_message))
-
-    def error(self,msg):
+    def error(self, msg):
         self.get_logger().error(str(msg))
-    
-    def warn(self,msg):
+
+    def warn(self, msg):
         self.get_logger().warn(str(msg))
-    
-    def set_velocity(self,x=0,y=0,z=0,ax=0,ay=0,az=0,speed=1.5):
-        r = R.from_quat([self.quat_rotation.x,self.quat_rotation.y,self.quat_rotation.z,self.quat_rotation.w])
-        applied = r.apply([x,y,z])
 
-        self.info(applied)
+    def set_guided(self):
+        msg = SetMode.Request()
+        msg.base_mode = 0
+        msg.custom_mode = "GUIDED"
+        self.info("Request guided mode")
+        fut = self.setmode_client.call_async(msg)
+        def on_done(f):
+            self.guided_set = True
+        fut.add_done_callback(on_done)
 
-        self.twist = self.geo_message.twist
-        self.twist.linear.x = float(applied[0]) * speed
-        self.twist.linear.y = float(applied[1]) * speed
-        self.twist.linear.z = float(applied[2]) * speed
+    def arm(self):
+        msg = CommandBool.Request()
+        msg.value = True
+        self.info("Arming vehicle")
+        fut = self.arm_client.call_async(msg)
+        def on_done(f):
+            self.armed = True
+        fut.add_done_callback(on_done)
 
-        self.twist.linear.x, self.twist.linear.y, self.twist.linear.z = -self.twist.linear.y, self.twist.linear.x, self.twist.linear.z
+    def takeoff(self, alt: float):
+        msg = CommandTOL.Request()
+        msg.altitude = float(alt)
+        self.info("Request takeoff")
+        fut = self.takeoff_client.call_async(msg)
+        def on_done(f):
+            self.takeoff_sent = True
+        fut.add_done_callback(on_done)
 
-        self.twist.angular.x = float(ax) * speed
-        self.twist.angular.y = float(ay) * speed
-        self.twist.angular.z = float(az) * speed
-
-        self.velocity_publisher.publish(self.geo_message)
-
-def wait_for_result(eq,msg_ok,msg_error="",error_fun=None):
-    global minimal_client
-    while rclpy.ok():
-        rclpy.spin_once(minimal_client)
-        if eq(minimal_client)._done:
-            if eq(minimal_client)._result.success:
-                minimal_client.info(msg_ok)
-            else:
-                if msg_error != "":
-                    minimal_client.error(msg_error)
-                if error_fun != None:
-                    error_fun()
-            break
-
-def wait_for_point():
-    global minimal_client
-    while rclpy.ok() and not minimal_client.point_flag:
-        rclpy.spin_once(minimal_client)
-    minimal_client.point_flag = False
-
-def ask_velocity():
-    global minimal_client
-    while rclpy.ok():
-        rclpy.spin_once(minimal_client)
-        vel = minimal_client.req_speed
-        minimal_client.set_velocity(x=vel.x,y=vel.y,z=vel.z,speed=SPEED)
-
-def wait_for_takeoff(alt=2):
-    global minimal_client
-    while minimal_client.rel_alt <= alt-(0.25*alt) and rclpy.ok():
-        rclpy.spin_once(minimal_client)
-        #minimal_client.info(minimal_client.rel_alt)
-    minimal_client.info("Vehicle takeoffed to " + str(minimal_client.rel_alt))
-
-def wait_for_mode(eq,msg_ok,msg_error="",error_fun=None):
-    global minimal_client
-    while rclpy.ok():
-        rclpy.spin_once(minimal_client)
-        if eq(minimal_client)._done:
-            if eq(minimal_client)._result.mode_sent:
-                minimal_client.info(msg_ok)
-            else:
-                if msg_error != "":
-                    minimal_client.error(msg_error)
-                if error_fun != None:
-                    error_fun()
-            break
 
 def main(args=None):
-    global minimal_client
     rclpy.init(args=args)
-    minimal_client = MavrosUniversalVehicleDriver()
-    minimal_client.info("Waiting for first message at /mavlink_driver/point Vector3")
-    wait_for_point()
-    
-    minimal_client.subscribe_altitude()
-    
-    minimal_client.guided()
-    wait_for_mode(lambda a : a.future_setmode,"Vehicle in GUIDED mode",error_fun = lambda : minimal_client.warn("Vehicle's mode wasn't changed but we can go ahead"))
-
-    minimal_client.arm_vehicle()
-    wait_for_result(lambda a : a.future_arm,"Vehicle ARMED","Vehicle wasn't armed !!!!")
-
-    minimal_client.takeoff()
-    wait_for_result(lambda a : a.future_takeoff,"Vehicle was asked to takeoff, will fly :)","FC Rejected takeoff !!!!")
-    wait_for_takeoff() 
-    
-    ask_velocity()
-    
-    
-    rclpy.spin(minimal_client)
-    minimal_client.destroy_node()
+    node = MavrosUniversalVehicleDriver()
+    rclpy.spin(node)
+    node.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
