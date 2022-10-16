@@ -6,6 +6,8 @@ from tf2_ros import TransformListener, Buffer
 from mavros_msgs.srv import CommandBool, CommandTOL, CommandLong, SetMode
 from geometry_msgs.msg import PoseStamped
 
+import numpy as np
+
 
 STATE_INIT = 'init'
 STATE_GUIDED_SENT = 'guided_sent'
@@ -107,7 +109,23 @@ class MavrosUniversalVehicleDriver(Node):
         msg.header.frame_id = 'map'
         msg.pose.position.x = target_enu.transform.translation.x
         msg.pose.position.y = target_enu.transform.translation.y
-        msg.pose.position.z = target_enu.transform.translation.z
+        msg.pose.position.z = target_enu.transform.translation.z - 2
+        
+        vec = np.array([
+            target_enu.transform.translation.x - drone_enu.transform.translation.x,
+            target_enu.transform.translation.y - drone_enu.transform.translation.y,
+            target_enu.transform.translation.z - drone_enu.transform.translation.z,
+        ])
+
+        vec = vec / np.linalg.norm(vec)
+
+        angle = np.arctan2(vec[1], vec[0])
+
+        msg.pose.orientation.x = 0.0
+        msg.pose.orientation.y = 0.0
+        msg.pose.orientation.z = np.sin(angle / 2)
+        msg.pose.orientation.w = np.cos(angle / 2)
+
         self.setpoint_pub.publish(msg)
 
     def info(self, msg):
