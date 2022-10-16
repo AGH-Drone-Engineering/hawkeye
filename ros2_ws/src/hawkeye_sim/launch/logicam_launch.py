@@ -4,10 +4,10 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     return LaunchDescription([
-        # Node(
-        #     package='hawkeye_sim',
-        #     executable='gods_hand',
-        # ),
+        Node(
+            package='hawkeye_sim',
+            executable='gods_hand',
+        ),
         Node(
             package='hawkeye_sim',
             executable='logical_camera',
